@@ -1,4 +1,4 @@
-const CACHE = "they-run-v1";
+const CACHE = "they-run-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -34,7 +34,9 @@ self.addEventListener("fetch", (event) => {
         const hit = await caches.match(req);
         if (hit) return hit;
         if (req.mode === "navigate") {
-          const shell = await caches.match("/");
+          const shell =
+            (await caches.match(req)) ||
+            (await caches.match(new URL(".", self.registration.scope).href));
           if (shell) return shell;
         }
         return Response.error();
