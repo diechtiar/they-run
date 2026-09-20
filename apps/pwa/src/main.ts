@@ -7,11 +7,10 @@ import {
   createIdleState,
   deriveSpeed,
   emaBaseline,
-  speedRatio,
+  skipChase,
   startDemo,
   startSession,
   stopSession,
-  targetSpeedMps,
   tick,
   type EngineState,
   type GeoStatus,
@@ -27,7 +26,9 @@ function loadSettings(): HuntSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    parsed.protocolId = "surge90";
+    return parsed;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -37,7 +38,7 @@ function saveSettings(s: HuntSettings) {
   localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(s));
 }
 
-type Recap = { at: number; alerts: number; evaded: number; close: number; ms: number };
+type Recap = { at: number; alerts: number; evaded: number; caught: number; ms: number };
 
 function loadRecap(): Recap | null {
   try {
@@ -61,7 +62,7 @@ let baseline = 0;
 let cheatHeld = false;
 let wake: WakeLockSentinel | null = null;
 let watchId: number | null = null;
-let lastOutcome: "clear" | "close" | null = null;
+let lastOutcome: "clear" | "caught" | "skip" | null = null;
 let lastPaint = 0;
 let running = false;
 
@@ -79,8 +80,8 @@ function word(): { text: string; cls: string } {
     return { text: holding ? "HOLDING" : "CHASE", cls: "chase" };
   }
   if (lastOutcome === "clear") return { text: "CLEAR", cls: "clear" };
-  if (lastOutcome === "close") return { text: "CLOSE", cls: "chase" };
-  return { text: "CLEAR", cls: "" };
+  if (lastOutcome === "caught") return { text: "GOT YOU", cls: "chase" };
+  return { text: "IDLE", cls: "" };
 }
 
 function paint() {
@@ -96,6 +97,7 @@ function paint() {
   const inChase = state.phase === "chase";
   const bar = inChase ? Math.round(state.proximity * 100) : 0;
   const zone = inChase ? (state.speedRatio >= 1 ? " · in zone" : " · SPEED UP") : "";
+  const live = state.phase !== "idle";
 
   root.innerHTML = `
     <h1>THEY RUN</h1>
@@ -103,20 +105,23 @@ function paint() {
     <p class="clock">${clock}${zone}</p>
     <div class="bar ${inChase ? "chase" : ""}"><span style="width:${bar}%"></span></div>
     <p class="meta">${kmh} km/h · GPS ${geo}${baseline > 0 ? ` · base ${(baseline * 3.6).toFixed(1)} km/h` : ""}</p>
-    <p class="meta">VO2max · 90s at +20% · six an hour after the first chase</p>
+    <p class="meta">Surge / 90s · +20%</p>
     <div class="row">
       ${
-        state.phase === "idle"
+        !live
           ? `<button type="button" class="primary" data-act="start">Start</button>
              <button type="button" data-act="demo">Demo</button>`
-          : `<button type="button" class="primary" data-act="stop">Stop</button>`
+          : `<button type="button" class="primary" data-act="stop">Stop</button>
+             ${inChase ? `<button type="button" data-act="skip">Skip</button>` : ""}`
       }
     </div>
+    ${!live ? `<p class="meta">Start only if the street is safe. Demo is a short fuse. Skip voids a chase.</p>` : ""}
     <label><input type="checkbox" data-cheat ${settings.cheatEnabled ? "checked" : ""}/> Indoor cheat (hold to sprint)</label>
+    <label><input type="checkbox" data-beeps ${settings.beepsEnabled ? "checked" : ""}/> Beeps (opt-in; fights other audio)</label>
     ${settings.cheatEnabled && inChase ? `<p class="meta">Hold the screen to stay in zone.</p>` : ""}
     ${
-      recap && state.phase === "idle"
-        ? `<div class="recap meta">Last: ${recap.alerts} alerts · ${recap.evaded} clear · ${recap.close} close${recap.ms ? ` · ${fmt(recap.ms)}` : ""}</div>`
+      recap && !live
+        ? `<div class="recap meta">Last: ${recap.alerts} chases · ${recap.evaded} clear · ${recap.caught} got you${recap.ms ? ` · ${fmt(recap.ms)}` : ""}</div>`
         : ""
     }
   `;
@@ -124,10 +129,18 @@ function paint() {
   root.querySelector("[data-act=start]")?.addEventListener("click", () => void begin(false));
   root.querySelector("[data-act=demo]")?.addEventListener("click", () => void begin(true));
   root.querySelector("[data-act=stop]")?.addEventListener("click", end);
+  root.querySelector("[data-act=skip]")?.addEventListener("click", skip);
   const cheat = root.querySelector("[data-cheat]") as HTMLInputElement | null;
   cheat?.addEventListener("change", () => {
     settings = { ...settings, cheatEnabled: !!cheat.checked };
     saveSettings(settings);
+    paint();
+  });
+  const beeps = root.querySelector("[data-beeps]") as HTMLInputElement | null;
+  beeps?.addEventListener("change", () => {
+    settings = { ...settings, beepsEnabled: !!beeps.checked };
+    saveSettings(settings);
+    if (!settings.beepsEnabled) audio.stopBeeps();
     paint();
   });
 }
@@ -177,8 +190,6 @@ async function begin(demo: boolean) {
   baseline = 0;
   accepted = null;
   state = demo ? startDemo(Date.now(), settings) : startSession(Date.now(), settings);
-  if (demo && settings.voiceEnabled) audio.speak("Chase");
-  if (demo && settings.beepsEnabled) audio.startBeeps(() => beepIntervalMs(state.proximity));
   try {
     wake = (await navigator.wakeLock?.request("screen")) ?? null;
   } catch {
@@ -191,6 +202,20 @@ async function begin(demo: boolean) {
   requestAnimationFrame(frame);
 }
 
+function skip() {
+  const r = skipChase(state, Date.now(), settings);
+  state = r.state;
+  audio.stopBeeps();
+  if (r.events.includes("skip")) lastOutcome = "skip";
+  if (state.phase === "idle") {
+    running = false;
+    stopGeo();
+    void wake?.release();
+    wake = null;
+  }
+  paint();
+}
+
 function end() {
   running = false;
   if (state.phase !== "idle") {
@@ -198,7 +223,7 @@ function end() {
       at: Date.now(),
       alerts: state.alertsFired,
       evaded: state.evaded,
-      close: state.closeCalls,
+      caught: state.caught,
       ms: state.sessionStartedAt ? Date.now() - state.sessionStartedAt : 0,
     };
     saveRecap(recap);
@@ -215,13 +240,12 @@ function end() {
 function frame(t: number) {
   if (!running) return;
   const now = Date.now();
-  const target = targetSpeedMps(baseline, settings.paceIncreasePct);
   if (state.phase === "scanning" && accepted) {
     baseline = emaBaseline(baseline, accepted.mps);
   }
   const { state: next, events } = tick(state, now, {
     settings,
-    speedRatio: speedRatio(accepted?.mps ?? null, target),
+    currentMps: accepted?.mps ?? null,
     cheat: cheatHeld,
   });
   state = next;
@@ -232,10 +256,10 @@ function frame(t: number) {
       if (settings.beepsEnabled) audio.startBeeps(() => beepIntervalMs(state.proximity));
       if (settings.hapticsEnabled) navigator.vibrate?.([40, 40, 80]);
     }
-    if (e === "clear" || e === "close") {
+    if (e === "clear" || e === "caught") {
       lastOutcome = e;
       audio.stopBeeps();
-      if (settings.voiceEnabled) audio.speak(e === "clear" ? "Clear" : "Close");
+      if (settings.voiceEnabled) audio.speak(e === "clear" ? "Clear" : "Got you");
     }
   }
   if (t - lastPaint > 250 || events.length) {

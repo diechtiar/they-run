@@ -1,11 +1,14 @@
 # THEY RUN
 
-Interval work as a chase. Phone PWA. No radar.
+A chase on the phone. Interval work if you keep going. No map, no sweep.
 
-- `packages/hunt-engine` — protocols, `tick()`, GPS filters. No UI.
-- `apps/pwa` — one screen: SCANNING / CHASE / CLEAR, a clock, a fill bar.
+- `packages/hunt-engine` — one preset (Surge / 90s), `tick()`, GPS filters.
+- `apps/pwa` — SCANNING / CHASE / CLEAR / GOT YOU, a clock, a fill bar.
 
-Solo hunt only. Multiplayer is parked (see later). Indoor cheat (hold to sprint) is off by default.
+**Demo** — chase in ~20s (couch).  
+**Start** — first chase in 3 minutes; only if the street is safe. **Skip** voids a chase (not CLEAR, not GOT YOU). Later gaps follow six 90s surges per hour at +20%.
+
+Beeps are opt-in (they fight other audio). Voice is three words: Chase, Clear, Got you. Indoor hold-to-sprint is off by default. Official rule: CLEAR if you spent ≥70% of the surge at target. No Android wrap this week.
 
 ## Run
 
@@ -15,21 +18,12 @@ npm test
 npm run dev
 ```
 
-Open the printed URL on a phone. Allow location. **Start**: first chase in ~20s so you feel it; after that, six 90s surges per hour at +20% (a VO2max dose if you keep walking). **Demo** is one chase right now (couch).
+HTTPS: https://diechtiar.github.io/they-run/  
+Phone: open that URL, **Add to Home Screen**. The service worker caches the shell on first visit. GPS still needs the screen on.
 
-HTTPS build (GitHub Pages): https://diechtiar.github.io/they-run/  
-Phone: open that URL, **Add to Home Screen**. The service worker caches the shell on first visit; the laptop is not required after that. GPS still needs the screen on.
-
-Local: `npm run build` then serve `apps/pwa/dist` (not `file://`). Dev (`npm run dev`) does not register the worker. Pages builds set `GITHUB_PAGES=1` so asset URLs are `/they-run/`.
-
-Success: you get chased, you speed up, and repeating that would be interval work.
+Local: `npm run build` then serve `apps/pwa/dist` (not `file://`). Dev does not register the worker. Pages builds set `GITHUB_PAGES=1` so asset URLs are `/they-run/`.
 
 ## Stack
 
-Vite + TypeScript PWA. Engine is a workspace package so a later API or Capacitor
-app can reuse it. No accounts. Recap is `localStorage`.
-
-This is a **website you can install on the phone** (Add to Home Screen). It is
-not an App Store binary yet. That is enough for a walk with the screen on.
-When iOS kills GPS with the screen off, wrap this same app in Capacitor — same
-engine, same UI, native location. You are not late; that is the usual order.
+Vite + TypeScript PWA. Engine is a workspace package. No accounts. Recap is `localStorage`.
+This is a website you can install. It is not an App Store binary yet.

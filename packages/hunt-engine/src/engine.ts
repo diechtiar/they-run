@@ -1,3 +1,4 @@
+import { targetSpeedMps } from "./gps.ts";
 import type { HuntSettings } from "./protocols.ts";
 
 function clamp(value: number, min: number, max: number) {
@@ -17,29 +18,32 @@ export type EngineState = {
   lastTickAt: number | null;
   proximity: number;
   speedRatio: number;
+  /** Frozen at detect. Null when not in chase. */
+  targetMps: number | null;
   zoneMs: number;
   chaseMs: number;
   alertsFired: number;
   evaded: number;
-  closeCalls: number;
+  caught: number;
 };
 
-export type EngineEvent = "detect" | "clear" | "close";
+export type EngineEvent = "detect" | "clear" | "caught" | "skip";
 
 export type TickInput = {
   settings: HuntSettings;
-  /** 0 when no usable GPS sample. */
-  speedRatio: number;
-  /** Indoor cheat: count as in-zone. */
+  /** Tests may pass a ratio directly. Otherwise derived from currentMps / frozen target. */
+  speedRatio?: number;
+  currentMps?: number | null;
   cheat?: boolean;
   rng?: () => number;
 };
 
 export const RECOVER_MS = 4_200;
 export const MIN_RECOVERY_AFTER_CHASE_MS = 40_000;
-/** First live chase: short enough to feel on a phone, then the protocol mean. */
-export const FIRST_CHASE_MS = 20_000;
-/** Fraction of the surge that must be at or above target to CLEAR. */
+/** Demo only: short fuse so you feel a chase on the couch. */
+export const DEMO_FIRST_MS = 20_000;
+/** Live Start: first gap is a different product from Demo. */
+export const START_FIRST_GAP_MS = 180_000;
 export const ZONE_FRACTION = 0.7;
 
 export function createIdleState(): EngineState {
@@ -54,11 +58,12 @@ export function createIdleState(): EngineState {
     lastTickAt: null,
     proximity: 0,
     speedRatio: 0,
+    targetMps: null,
     zoneMs: 0,
     chaseMs: 0,
     alertsFired: 0,
     evaded: 0,
-    closeCalls: 0,
+    caught: 0,
   };
 }
 
@@ -68,7 +73,7 @@ export function beepIntervalMs(proximity: number) {
   return 1120 - eased * 1020;
 }
 
-/** After the first chase: protocol mean (VO2max ≈ 10 min), never shorter than recovery. */
+/** After the first chase: protocol mean, never shorter than recovery. */
 export function nextAlertDelayMs(
   settings: HuntSettings,
   opts: { rng: () => number },
@@ -84,8 +89,10 @@ function enterChase(
   now: number,
   settings: HuntSettings,
   demo: boolean,
+  currentMps: number | null,
 ): EngineState {
   const duration = Math.max(15, settings.chaseDurationSec) * 1000;
+  const target = targetSpeedMps(currentMps ?? 0, settings.paceIncreasePct);
   return {
     ...state,
     phase: "chase",
@@ -97,6 +104,7 @@ function enterChase(
     lastTickAt: now,
     proximity: 0.16,
     speedRatio: 0,
+    targetMps: target,
     zoneMs: 0,
     chaseMs: 0,
     alertsFired: state.alertsFired + 1,
@@ -114,24 +122,65 @@ export function startSession(
     demo: false,
     sessionStartedAt: now,
     lastTickAt: now,
-    nextAlertAt: now + FIRST_CHASE_MS,
+    nextAlertAt: now + START_FIRST_GAP_MS,
   };
 }
 
-export function startDemo(
-  now: number,
-  settings: HuntSettings,
-): EngineState {
-  return enterChase(createIdleState(), now, settings, true);
+export function startDemo(now: number, settings: HuntSettings): EngineState {
+  return {
+    ...createIdleState(),
+    phase: "scanning",
+    demo: true,
+    sessionStartedAt: now,
+    lastTickAt: now,
+    nextAlertAt: now + DEMO_FIRST_MS,
+  };
 }
 
 export function stopSession(): EngineState {
   return createIdleState();
 }
 
-export function effectiveRatio(input: TickInput): number {
-  if (input.cheat && input.settings.cheatEnabled) return Math.max(input.speedRatio, 1.2);
-  return input.speedRatio;
+/** Void the current chase. Does not count as CLEAR or GOT YOU. */
+export function skipChase(
+  state: EngineState,
+  now: number,
+  settings: HuntSettings,
+  rng: () => number = Math.random,
+): { state: EngineState; events: EngineEvent[] } {
+  if (state.phase !== "chase") return { state, events: [] };
+  if (state.demo) {
+    return { state: createIdleState(), events: ["skip"] };
+  }
+  return {
+    state: {
+      ...state,
+      phase: "scanning",
+      chaseStartedAt: null,
+      chaseEndsAt: null,
+      recoverUntil: null,
+      proximity: 0,
+      speedRatio: 0,
+      targetMps: null,
+      zoneMs: 0,
+      chaseMs: 0,
+      alertsFired: Math.max(0, state.alertsFired - 1),
+      nextAlertAt: now + nextAlertDelayMs(settings, { rng }),
+      lastTickAt: now,
+    },
+    events: ["skip"],
+  };
+}
+
+export function effectiveRatio(input: TickInput, targetMps: number | null): number {
+  let ratio = input.speedRatio;
+  if (ratio == null) {
+    const target = targetMps ?? 0;
+    const cur = input.currentMps;
+    ratio = !cur || target <= 0 ? 0 : cur / target;
+  }
+  if (input.cheat && input.settings.cheatEnabled) return Math.max(ratio, 1.2);
+  return ratio;
 }
 
 export function tick(
@@ -145,16 +194,17 @@ export function tick(
   const events: EngineEvent[] = [];
   const rawDt = state.lastTickAt == null ? 0.05 : (now - state.lastTickAt) / 1000;
   const dt = clamp(rawDt, 0, 0.25);
-  const ratio = effectiveRatio(input);
-  let next: EngineState = { ...state, speedRatio: ratio, lastTickAt: now };
 
-  if (next.phase === "scanning") {
-    if (next.nextAlertAt != null && now >= next.nextAlertAt) {
-      next = enterChase(next, now, input.settings, false);
-      events.push("detect");
+  if (state.phase === "scanning") {
+    if (state.nextAlertAt != null && now >= state.nextAlertAt) {
+      const next = enterChase(state, now, input.settings, state.demo, input.currentMps ?? null);
+      return { state: { ...next, lastTickAt: now }, events: ["detect"] };
     }
-    return { state: next, events };
+    return { state: { ...state, lastTickAt: now }, events };
   }
+
+  const ratio = effectiveRatio(input, state.targetMps);
+  let next: EngineState = { ...state, speedRatio: ratio, lastTickAt: now };
 
   if (next.phase === "chase") {
     const durationSec = Math.max(15, input.settings.chaseDurationSec);
@@ -183,11 +233,12 @@ export function tick(
         recoverUntil: now + RECOVER_MS,
         chaseStartedAt: null,
         chaseEndsAt: null,
+        targetMps: null,
         proximity: escaped ? 0.08 : 0.72,
         evaded: next.evaded + (escaped ? 1 : 0),
-        closeCalls: next.closeCalls + (escaped ? 0 : 1),
+        caught: next.caught + (escaped ? 0 : 1),
       };
-      events.push(escaped ? "clear" : "close");
+      events.push(escaped ? "clear" : "caught");
     }
     return { state: next, events };
   }
