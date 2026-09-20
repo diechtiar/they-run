@@ -37,6 +37,8 @@ export type TickInput = {
 
 export const RECOVER_MS = 4_200;
 export const MIN_RECOVERY_AFTER_CHASE_MS = 40_000;
+/** First live chase: short enough to feel on a phone, then the protocol mean. */
+export const FIRST_CHASE_MS = 20_000;
 /** Fraction of the surge that must be at or above target to CLEAR. */
 export const ZONE_FRACTION = 0.7;
 
@@ -66,7 +68,7 @@ export function beepIntervalMs(proximity: number) {
   return 1120 - eased * 1020;
 }
 
-/** Mean gap from alerts/hour. First chase uses the same mean (not a preview 18s). */
+/** After the first chase: protocol mean (VO2max ≈ 10 min), never shorter than recovery. */
 export function nextAlertDelayMs(
   settings: HuntSettings,
   opts: { rng: () => number },
@@ -112,7 +114,7 @@ export function startSession(
     demo: false,
     sessionStartedAt: now,
     lastTickAt: now,
-    nextAlertAt: now + nextAlertDelayMs(settings, { rng }),
+    nextAlertAt: now + FIRST_CHASE_MS,
   };
 }
 

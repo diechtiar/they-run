@@ -1,6 +1,5 @@
 import {
   DEFAULT_SETTINGS,
-  PROTOCOLS,
   RECAP_STORAGE_KEY,
   SETTINGS_STORAGE_KEY,
   acceptSample,
@@ -8,7 +7,6 @@ import {
   createIdleState,
   deriveSpeed,
   emaBaseline,
-  settingsFromProtocol,
   speedRatio,
   startDemo,
   startSession,
@@ -18,7 +16,6 @@ import {
   type EngineState,
   type GeoStatus,
   type HuntSettings,
-  type ProtocolId,
   type SpeedSample,
 } from "@they-run/hunt-engine";
 import { createAudio } from "./audio.ts";
@@ -98,12 +95,6 @@ function paint() {
   const kmh = accepted ? accepted.kmh.toFixed(1) : "—";
   const inChase = state.phase === "chase";
   const bar = inChase ? Math.round(state.proximity * 100) : 0;
-  const proto = Object.values(PROTOCOLS)
-    .map(
-      (p) =>
-        `<button type="button" data-proto="${p.id}" class="${settings.protocolId === p.id ? "on" : ""}">${p.name}</button>`,
-    )
-    .join("");
   const zone = inChase ? (state.speedRatio >= 1 ? " · in zone" : " · SPEED UP") : "";
 
   root.innerHTML = `
@@ -112,7 +103,7 @@ function paint() {
     <p class="clock">${clock}${zone}</p>
     <div class="bar ${inChase ? "chase" : ""}"><span style="width:${bar}%"></span></div>
     <p class="meta">${kmh} km/h · GPS ${geo}${baseline > 0 ? ` · base ${(baseline * 3.6).toFixed(1)} km/h` : ""}</p>
-    <div class="protocols">${proto}</div>
+    <p class="meta">VO2max · 90s at +20% · six an hour after the first chase</p>
     <div class="row">
       ${
         state.phase === "idle"
@@ -130,14 +121,6 @@ function paint() {
     }
   `;
 
-  root.querySelectorAll("[data-proto]").forEach((el) => {
-    el.addEventListener("click", () => {
-      if (state.phase !== "idle") return;
-      settings = settingsFromProtocol((el as HTMLElement).dataset.proto as ProtocolId);
-      saveSettings(settings);
-      paint();
-    });
-  });
   root.querySelector("[data-act=start]")?.addEventListener("click", () => void begin(false));
   root.querySelector("[data-act=demo]")?.addEventListener("click", () => void begin(true));
   root.querySelector("[data-act=stop]")?.addEventListener("click", end);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_SETTINGS,
+  FIRST_CHASE_MS,
   PROTOCOLS,
   ZONE_FRACTION,
   createIdleState,
@@ -14,21 +15,19 @@ import {
 const rng = () => 0.5;
 
 describe("nextAlertDelayMs", () => {
-  it("uses the protocol mean, not an 18s preview", () => {
+  it("later chases use the protocol mean (VO2max dose if you keep going)", () => {
     const vo2 = { ...DEFAULT_SETTINGS, randomizeTiming: false };
     const delay = nextAlertDelayMs(vo2, { rng });
     const mean = 3_600_000 / PROTOCOLS.vo2max.alertsPerHour;
     assert.ok(delay >= mean - 1);
-    assert.ok(delay !== 18_000);
   });
 });
 
 describe("session", () => {
-  it("starts scanning with first alert at the mean", () => {
-    const settings = { ...DEFAULT_SETTINGS, randomizeTiming: false };
-    const s = startSession(0, settings, rng);
+  it("first live chase is soon enough to feel on a phone", () => {
+    const s = startSession(0, DEFAULT_SETTINGS, rng);
     assert.equal(s.phase, "scanning");
-    assert.equal(s.nextAlertAt, nextAlertDelayMs(settings, { rng }));
+    assert.equal(s.nextAlertAt, FIRST_CHASE_MS);
   });
 
   it("demo enters chase immediately", () => {

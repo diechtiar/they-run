@@ -15,10 +15,16 @@ npm test
 npm run dev
 ```
 
-Open the printed URL on a phone. Allow location. **Start** for a real session (first chase at the protocol mean, e.g. ~10 min on VO2max). **Demo** fires one chase now.
+Open the printed URL on a phone. Allow location. **Start**: first chase in ~20s so you feel it; after that, six 90s surges per hour at +20% (a VO2max dose if you keep walking). **Demo** is one chase right now (couch).
 
-Success: a 4×4 outdoors that *feels* like 4×4.
+Success: you get chased, you speed up, and repeating that would be interval work.
 
 ## Stack
 
-Vite + TypeScript PWA. Engine is a workspace package so a later API or Capacitor app can reuse it. No accounts. Recap is `localStorage`.
+Vite + TypeScript PWA. Engine is a workspace package so a later API or Capacitor
+app can reuse it. No accounts. Recap is `localStorage`.
+
+This is a **website you can install on the phone** (Add to Home Screen). It is
+not an App Store binary yet. That is enough for a walk with the screen on.
+When iOS kills GPS with the screen off, wrap this same app in Capacitor — same
+engine, same UI, native location. You are not late; that is the usual order.
