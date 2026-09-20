@@ -1,0 +1,15 @@
+{
+  "name": "they-run",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm test -w @they-run/hunt-engine",
+    "dev": "npm run dev -w @they-run/pwa",
+    "build": "npm run build -w @they-run/pwa"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
