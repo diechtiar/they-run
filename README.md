@@ -17,6 +17,8 @@ npm run dev
 
 Open the printed URL on a phone. Allow location. **Start**: first chase in ~20s so you feel it; after that, six 90s surges per hour at +20% (a VO2max dose if you keep walking). **Demo** is one chase right now (couch).
 
+Production build (`npm run build`) registers a service worker. Serve `apps/pwa/dist` once (any static HTTP origin — not `file://`). Phone: visit, **Add to Home Screen**. After that the shell is cached; the laptop can go away. GPS still needs the screen on. Dev (`npm run dev`) does not register the worker, so reload stays simple.
+
 Success: you get chased, you speed up, and repeating that would be interval work.
 
 ## Stack

@@ -256,3 +256,7 @@ window.addEventListener("pointercancel", () => {
 });
 
 paint();
+
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  void navigator.serviceWorker.register("/sw.js");
+}
