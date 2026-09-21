@@ -10,7 +10,28 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <h1>THEY RUN</h1>
+      <p class="word" data-el="word">IDLE</p>
+      <p class="clock" data-el="clock"></p>
+      <div class="bar" data-el="bar" title="how close they are"><span data-el="barFill"></span></div>
+      <p class="meta" data-el="gps"></p>
+      <p class="meta">Surge / 90s · +20%</p>
+      <div class="row">
+        <button type="button" class="primary" data-act="start">Start</button>
+        <button type="button" data-act="demo">Demo</button>
+        <button type="button" class="primary" data-act="stop" hidden>Stop</button>
+        <button type="button" data-act="skip" hidden>Skip</button>
+      </div>
+      <p class="meta" data-el="safety">Start only if the street is safe. Demo is a short fuse. Skip voids a chase.</p>
+      <label><input type="checkbox" data-cheat /> Indoor cheat (hold to sprint)</label>
+      <label><input type="checkbox" data-beeps /> Beeps (opt-in; fights other audio)</label>
+      <p class="meta" data-el="hold" hidden>Hold the screen to stay in zone.</p>
+      <div class="recap meta" data-el="recap" hidden>
+        <span data-el="recapLast"></span>
+        <span data-el="recapSession"></span>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

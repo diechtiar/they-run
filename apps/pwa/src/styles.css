@@ -90,3 +90,4 @@ h1 {
 }
 label { display: flex; gap: 0.4rem; align-items: center; }
 .recap { border-top: 1px solid #2a2926; padding-top: 1rem; }
+.recap span { display: block; }

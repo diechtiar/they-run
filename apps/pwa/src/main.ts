@@ -27,6 +27,39 @@ import { createAudio } from "./audio.ts";
 const root = document.querySelector("#app")!;
 const audio = createAudio();
 
+function el<T extends HTMLElement>(name: string): T {
+  const node = root.querySelector(`[data-el="${name}"]`);
+  if (!node) throw new Error(`missing [data-el=${name}]`);
+  return node as T;
+}
+
+const ui = {
+  word: el<HTMLElement>("word"),
+  clock: el<HTMLElement>("clock"),
+  bar: el<HTMLElement>("bar"),
+  barFill: el<HTMLElement>("barFill"),
+  gps: el<HTMLElement>("gps"),
+  safety: el<HTMLElement>("safety"),
+  hold: el<HTMLElement>("hold"),
+  recap: el<HTMLElement>("recap"),
+  recapLast: el<HTMLElement>("recapLast"),
+  recapSession: el<HTMLElement>("recapSession"),
+  start: root.querySelector("[data-act=start]") as HTMLButtonElement,
+  demo: root.querySelector("[data-act=demo]") as HTMLButtonElement,
+  stop: root.querySelector("[data-act=stop]") as HTMLButtonElement,
+  skip: root.querySelector("[data-act=skip]") as HTMLButtonElement,
+  cheat: root.querySelector("[data-cheat]") as HTMLInputElement,
+  beeps: root.querySelector("[data-beeps]") as HTMLInputElement,
+};
+
+function setText(node: HTMLElement, value: string) {
+  if (node.textContent !== value) node.textContent = value;
+}
+
+function setHidden(node: HTMLElement, hidden: boolean) {
+  if (node.hidden !== hidden) node.hidden = hidden;
+}
+
 function loadSettings(): HuntSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -66,7 +99,6 @@ let cheatHeld = false;
 let wake: WakeLockSentinel | null = null;
 let watchId: number | null = null;
 let lastOutcome: "clear" | "caught" | "skip" | null = null;
-let lastPaint = 0;
 let running = false;
 
 function fmt(ms: number) {
@@ -87,18 +119,6 @@ function word(): { text: string; cls: string } {
   return { text: "IDLE", cls: "" };
 }
 
-function recapLine(): string {
-  if (!recap || state.phase === "chase") return "";
-  const last = recap.last
-    ? recap.last.outcome === "clear"
-      ? `Last surge: CLEAR · ${recap.last.zonePct}% in zone`
-      : `Last surge: GOT YOU · ${recap.last.zonePct}% in zone`
-    : "";
-  const session = `${recap.alerts} chase${recap.alerts === 1 ? "" : "s"} · ${recap.evaded} clear · ${recap.caught} got you${recap.ms ? ` · ${fmt(recap.ms)}` : ""}`;
-  if (!last && recap.alerts === 0 && recap.evaded === 0 && recap.caught === 0) return "";
-  return `<div class="recap meta">${last}${last ? "<br/>" : ""}${session}</div>`;
-}
-
 function paint() {
   const now = Date.now();
   const w = word();
@@ -114,47 +134,42 @@ function paint() {
   const bar = theyVisible ? Math.round(Math.min(1, Math.max(0, state.proximity)) * 100) : 0;
   const zone = inChase ? (state.speedRatio >= 1 ? " · pulling away" : " · they're closing") : "";
   const live = state.phase !== "idle";
+  const wordClass = w.cls ? `word ${w.cls}` : "word";
+  if (ui.word.className !== wordClass) ui.word.className = wordClass;
+  setText(ui.word, w.text);
+  setText(ui.clock, `${clock}${zone}`);
+  ui.bar.classList.toggle("chase", theyVisible);
+  const width = `${bar}%`;
+  if (ui.barFill.style.width !== width) ui.barFill.style.width = width;
+  setText(
+    ui.gps,
+    `${kmh} km/h · GPS ${geo}${baseline > 0 ? ` · base ${(baseline * 3.6).toFixed(1)} km/h` : ""}`,
+  );
+  setHidden(ui.start, live);
+  setHidden(ui.demo, live);
+  setHidden(ui.stop, !live);
+  setHidden(ui.skip, !inChase);
+  setHidden(ui.safety, live);
+  setHidden(ui.hold, !(settings.cheatEnabled && inChase));
+  if (ui.cheat.checked !== settings.cheatEnabled) ui.cheat.checked = settings.cheatEnabled;
+  if (ui.beeps.checked !== settings.beepsEnabled) ui.beeps.checked = settings.beepsEnabled;
 
-  root.innerHTML = `
-    <h1>THEY RUN</h1>
-    <p class="word ${w.cls}">${w.text}</p>
-    <p class="clock">${clock}${zone}</p>
-    <div class="bar ${theyVisible ? "chase" : ""}" title="how close they are"><span style="width:${bar}%"></span></div>
-    <p class="meta">${kmh} km/h · GPS ${geo}${baseline > 0 ? ` · base ${(baseline * 3.6).toFixed(1)} km/h` : ""}</p>
-    <p class="meta">Surge / 90s · +20%</p>
-    <div class="row">
-      ${
-        !live
-          ? `<button type="button" class="primary" data-act="start">Start</button>
-             <button type="button" data-act="demo">Demo</button>`
-          : `<button type="button" class="primary" data-act="stop">Stop</button>
-             ${inChase ? `<button type="button" data-act="skip">Skip</button>` : ""}`
-      }
-    </div>
-    ${!live ? `<p class="meta">Start only if the street is safe. Demo is a short fuse. Skip voids a chase.</p>` : ""}
-    <label><input type="checkbox" data-cheat ${settings.cheatEnabled ? "checked" : ""}/> Indoor cheat (hold to sprint)</label>
-    <label><input type="checkbox" data-beeps ${settings.beepsEnabled ? "checked" : ""}/> Beeps (opt-in; fights other audio)</label>
-    ${settings.cheatEnabled && inChase ? `<p class="meta">Hold the screen to stay in zone.</p>` : ""}
-    ${recapLine()}
-  `;
-
-  root.querySelector("[data-act=start]")?.addEventListener("click", () => void begin(false));
-  root.querySelector("[data-act=demo]")?.addEventListener("click", () => void begin(true));
-  root.querySelector("[data-act=stop]")?.addEventListener("click", end);
-  root.querySelector("[data-act=skip]")?.addEventListener("click", skip);
-  const cheat = root.querySelector("[data-cheat]") as HTMLInputElement | null;
-  cheat?.addEventListener("change", () => {
-    settings = { ...settings, cheatEnabled: !!cheat.checked };
-    saveSettings(settings);
-    paint();
-  });
-  const beeps = root.querySelector("[data-beeps]") as HTMLInputElement | null;
-  beeps?.addEventListener("change", () => {
-    settings = { ...settings, beepsEnabled: !!beeps.checked };
-    saveSettings(settings);
-    if (!settings.beepsEnabled) audio.stopBeeps();
-    paint();
-  });
+  const last = recap?.last
+    ? recap.last.outcome === "clear"
+      ? `Last surge: CLEAR · ${recap.last.zonePct}% in zone`
+      : `Last surge: GOT YOU · ${recap.last.zonePct}% in zone`
+    : "";
+  const session = recap
+    ? `${recap.alerts} chase${recap.alerts === 1 ? "" : "s"} · ${recap.evaded} clear · ${recap.caught} got you${recap.ms ? ` · ${fmt(recap.ms)}` : ""}`
+    : "";
+  const showRecap =
+    !!recap &&
+    state.phase !== "chase" &&
+    !(!last && recap.alerts === 0 && recap.evaded === 0 && recap.caught === 0);
+  setHidden(ui.recap, !showRecap);
+  setHidden(ui.recapLast, !last);
+  setText(ui.recapLast, last);
+  setText(ui.recapSession, session);
 }
 
 function startGeo() {
@@ -209,7 +224,6 @@ async function begin(demo: boolean) {
   }
   startGeo();
   running = true;
-  lastPaint = 0;
   paint();
   requestAnimationFrame(frame);
 }
@@ -243,7 +257,7 @@ function end() {
   paint();
 }
 
-function frame(t: number) {
+function frame(_t: number) {
   if (!running) return;
   const now = Date.now();
   if (state.phase === "scanning" && accepted) {
@@ -270,10 +284,7 @@ function frame(t: number) {
       if (settings.voiceEnabled) audio.speak(e === "clear" ? "Clear" : "Got you");
     }
   }
-  if (t - lastPaint > 250 || events.length) {
-    lastPaint = t;
-    paint();
-  }
+  paint();
   requestAnimationFrame(frame);
 }
 
@@ -285,6 +296,22 @@ window.addEventListener("pointerup", () => {
 });
 window.addEventListener("pointercancel", () => {
   cheatHeld = false;
+});
+
+ui.start.addEventListener("click", () => void begin(false));
+ui.demo.addEventListener("click", () => void begin(true));
+ui.stop.addEventListener("click", end);
+ui.skip.addEventListener("click", skip);
+ui.cheat.addEventListener("change", () => {
+  settings = { ...settings, cheatEnabled: ui.cheat.checked };
+  saveSettings(settings);
+  paint();
+});
+ui.beeps.addEventListener("change", () => {
+  settings = { ...settings, beepsEnabled: ui.beeps.checked };
+  saveSettings(settings);
+  if (!settings.beepsEnabled) audio.stopBeeps();
+  paint();
 });
 
 paint();
