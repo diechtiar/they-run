@@ -7,7 +7,7 @@ export type HuntRecapLast = {
   outcome: RecapOutcome;
   zoneMs: number;
   durationMs: number;
-  /** 0–100. Same denominator as the official 70% rule (protocol duration). */
+  /** 0–100. Time in zone over the protocol surge length. */
   zonePct: number;
 };
 

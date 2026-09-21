@@ -16,6 +16,7 @@ export type EngineState = {
   chaseEndsAt: number | null;
   recoverUntil: number | null;
   lastTickAt: number | null;
+  /** Abstract closeness of the chaser: 0 far, 1 they have you. */
   proximity: number;
   speedRatio: number;
   /** Frozen at detect. Null when not in chase. */
@@ -45,6 +46,8 @@ export const DEMO_FIRST_MS = 20_000;
 /** Live Start: first gap is a different product from Demo. */
 export const START_FIRST_GAP_MS = 180_000;
 export const ZONE_FRACTION = 0.7;
+/** Bar at chase start — they are already on the approach. */
+export const CHASE_START_PROXIMITY = 0.22;
 
 export function createIdleState(): EngineState {
   return {
@@ -102,7 +105,7 @@ function enterChase(
     chaseEndsAt: now + duration,
     recoverUntil: null,
     lastTickAt: now,
-    proximity: 0.16,
+    proximity: CHASE_START_PROXIMITY,
     speedRatio: 0,
     targetMps: target,
     zoneMs: 0,
@@ -208,14 +211,17 @@ export function tick(
 
   if (next.phase === "chase") {
     const durationSec = Math.max(15, input.settings.chaseDurationSec);
-    const approach = 0.82 / durationSec;
+    // Standing still: they close the remaining gap in ~0.75 of the surge.
+    const closeRate = (1 - CHASE_START_PROXIMITY) / (durationSec * 0.75);
+    // In zone: they lose ground on the same time scale, not in a second.
+    const fallRate = (1 - CHASE_START_PROXIMITY) / durationSec;
     let proximity = next.proximity;
     if (ratio >= 1) {
-      proximity -= dt * 0.55 * Math.min(ratio, 1.7);
+      proximity -= dt * fallRate * Math.min(ratio, 1.6);
     } else {
-      proximity += dt * approach * (1.2 - ratio * 0.7);
+      proximity += dt * closeRate * (1.05 - ratio * 0.5);
     }
-    proximity = clamp(proximity, 0.06, 0.97);
+    proximity = clamp(proximity, 0, 1);
     const dtMs = dt * 1000;
     next = {
       ...next,
@@ -224,9 +230,10 @@ export function tick(
       chaseMs: next.chaseMs + dtMs,
     };
 
-    if (next.chaseEndsAt != null && now >= next.chaseEndsAt) {
-      const durationMs = Math.max(15, input.settings.chaseDurationSec) * 1000;
-      const escaped = next.zoneMs / durationMs >= ZONE_FRACTION;
+    const reached = next.proximity >= 1;
+    const timedOut = next.chaseEndsAt != null && now >= next.chaseEndsAt;
+    if (reached || timedOut) {
+      const caught = reached;
       next = {
         ...next,
         phase: "recovering",
@@ -234,11 +241,11 @@ export function tick(
         chaseStartedAt: null,
         chaseEndsAt: null,
         targetMps: null,
-        proximity: escaped ? 0.08 : 0.72,
-        evaded: next.evaded + (escaped ? 1 : 0),
-        caught: next.caught + (escaped ? 0 : 1),
+        proximity: caught ? 1 : next.proximity,
+        evaded: next.evaded + (caught ? 0 : 1),
+        caught: next.caught + (caught ? 1 : 0),
       };
-      events.push(escaped ? "clear" : "caught");
+      events.push(caught ? "caught" : "clear");
     }
     return { state: next, events };
   }

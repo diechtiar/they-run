@@ -8,7 +8,7 @@ A chase on the phone. Interval work if you keep going. No map, no sweep.
 **Demo** — chase in ~20s (couch).  
 **Start** — first chase in 3 minutes; only if the street is safe. **Skip** voids a chase (not CLEAR, not GOT YOU). Later gaps follow six 90s surges per hour at +20%.
 
-Beeps are opt-in (they fight other audio). Voice is three words: Chase, Clear, Got you. Indoor hold-to-sprint is off by default. Official rule: CLEAR if you spent ≥70% of the surge at target. No Android wrap this week.
+Beeps are opt-in (they fight other audio). Voice is three words: Chase, Clear, Got you. Indoor hold-to-sprint is off by default. The fill bar is how close they are. Full = GOT YOU. Stay at target to push them back. No Android wrap this week.
 
 ## Run
 

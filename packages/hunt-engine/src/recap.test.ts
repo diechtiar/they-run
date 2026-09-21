@@ -30,6 +30,7 @@ describe("recap", () => {
       const r = tick(s, t, { settings: DEFAULT_SETTINGS, speedRatio, rng });
       s = r.state;
       events = events.concat(r.events);
+      if (r.events.includes("caught") || r.events.includes("clear")) break;
     }
     return { s, events };
   }

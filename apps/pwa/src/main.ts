@@ -110,15 +110,16 @@ function paint() {
         : "";
   const kmh = accepted ? accepted.kmh.toFixed(1) : "—";
   const inChase = state.phase === "chase";
-  const bar = inChase ? Math.round(state.proximity * 100) : 0;
-  const zone = inChase ? (state.speedRatio >= 1 ? " · in zone" : " · SPEED UP") : "";
+  const theyVisible = inChase || state.phase === "recovering";
+  const bar = theyVisible ? Math.round(Math.min(1, Math.max(0, state.proximity)) * 100) : 0;
+  const zone = inChase ? (state.speedRatio >= 1 ? " · pulling away" : " · they're closing") : "";
   const live = state.phase !== "idle";
 
   root.innerHTML = `
     <h1>THEY RUN</h1>
     <p class="word ${w.cls}">${w.text}</p>
     <p class="clock">${clock}${zone}</p>
-    <div class="bar ${inChase ? "chase" : ""}"><span style="width:${bar}%"></span></div>
+    <div class="bar ${theyVisible ? "chase" : ""}" title="how close they are"><span style="width:${bar}%"></span></div>
     <p class="meta">${kmh} km/h · GPS ${geo}${baseline > 0 ? ` · base ${(baseline * 3.6).toFixed(1)} km/h` : ""}</p>
     <p class="meta">Surge / 90s · +20%</p>
     <div class="row">

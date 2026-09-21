@@ -5,7 +5,6 @@ import {
   DEMO_FIRST_MS,
   PROTOCOLS,
   START_FIRST_GAP_MS,
-  ZONE_FRACTION,
   createIdleState,
   nextAlertDelayMs,
   skipChase,
@@ -118,24 +117,44 @@ describe("chase outcome", () => {
       });
       s = r.state;
       events = events.concat(r.events);
+      if (r.events.includes("caught") || r.events.includes("clear")) break;
     }
     return { s, events };
   }
 
-  it("CLEAR when time-in-zone is at least 70%", () => {
+  it("CLEAR if you stay in zone for the surge (they never reach you)", () => {
     const { s, events } = runChase(1.2);
     assert.equal(s.phase, "recovering");
     assert.ok(events.includes("clear"));
     assert.equal(s.evaded, 1);
     assert.equal(s.caught, 0);
-    assert.ok(s.zoneMs / chaseMs >= ZONE_FRACTION);
+    assert.ok(s.proximity < 1);
   });
 
-  it("GOT YOU (caught) if standing still", () => {
+  it("GOT YOU when the bar fills (standing still)", () => {
     const { s, events } = runChase(0);
     assert.ok(events.includes("caught"));
     assert.equal(s.evaded, 0);
     assert.equal(s.caught, 1);
+    assert.equal(s.proximity, 1);
+  });
+
+  it("in-zone fall-back is gradual, not instant", () => {
+    let s = startDemo(0, DEFAULT_SETTINGS);
+    s = tick(s, DEMO_FIRST_MS, {
+      settings: DEFAULT_SETTINGS,
+      speedRatio: 1.2,
+      rng,
+    }).state;
+    const start = s.proximity;
+    s = tick(s, DEMO_FIRST_MS + 1000, {
+      settings: DEFAULT_SETTINGS,
+      speedRatio: 1.2,
+      rng,
+    }).state;
+    assert.ok(s.proximity < start, "they lose some ground");
+    assert.ok(s.proximity > start - 0.12, "not emptied in one second");
+    assert.equal(s.phase, "chase");
   });
 
   it("cheat counts as in-zone", () => {
