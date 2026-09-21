@@ -4,9 +4,13 @@ import {
   SETTINGS_STORAGE_KEY,
   acceptSample,
   beepIntervalMs,
+  chaseDurationMs,
   createIdleState,
   deriveSpeed,
   emaBaseline,
+  parseRecap,
+  recapAfterChase,
+  recapAfterStop,
   skipChase,
   startDemo,
   startSession,
@@ -14,6 +18,7 @@ import {
   tick,
   type EngineState,
   type GeoStatus,
+  type HuntRecap,
   type HuntSettings,
   type SpeedSample,
 } from "@they-run/hunt-engine";
@@ -38,18 +43,16 @@ function saveSettings(s: HuntSettings) {
   localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(s));
 }
 
-type Recap = { at: number; alerts: number; evaded: number; caught: number; ms: number };
-
-function loadRecap(): Recap | null {
+function loadRecap(): HuntRecap | null {
   try {
     const raw = localStorage.getItem(RECAP_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Recap) : null;
+    return raw ? parseRecap(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
 }
 
-function saveRecap(r: Recap) {
+function saveRecap(r: HuntRecap) {
   localStorage.setItem(RECAP_STORAGE_KEY, JSON.stringify(r));
 }
 
@@ -82,6 +85,18 @@ function word(): { text: string; cls: string } {
   if (lastOutcome === "clear") return { text: "CLEAR", cls: "clear" };
   if (lastOutcome === "caught") return { text: "GOT YOU", cls: "chase" };
   return { text: "IDLE", cls: "" };
+}
+
+function recapLine(): string {
+  if (!recap || state.phase === "chase") return "";
+  const last = recap.last
+    ? recap.last.outcome === "clear"
+      ? `Last surge: CLEAR · ${recap.last.zonePct}% in zone`
+      : `Last surge: GOT YOU · ${recap.last.zonePct}% in zone`
+    : "";
+  const session = `${recap.alerts} chase${recap.alerts === 1 ? "" : "s"} · ${recap.evaded} clear · ${recap.caught} got you${recap.ms ? ` · ${fmt(recap.ms)}` : ""}`;
+  if (!last && recap.alerts === 0 && recap.evaded === 0 && recap.caught === 0) return "";
+  return `<div class="recap meta">${last}${last ? "<br/>" : ""}${session}</div>`;
 }
 
 function paint() {
@@ -119,11 +134,7 @@ function paint() {
     <label><input type="checkbox" data-cheat ${settings.cheatEnabled ? "checked" : ""}/> Indoor cheat (hold to sprint)</label>
     <label><input type="checkbox" data-beeps ${settings.beepsEnabled ? "checked" : ""}/> Beeps (opt-in; fights other audio)</label>
     ${settings.cheatEnabled && inChase ? `<p class="meta">Hold the screen to stay in zone.</p>` : ""}
-    ${
-      recap && !live
-        ? `<div class="recap meta">Last: ${recap.alerts} chases · ${recap.evaded} clear · ${recap.caught} got you${recap.ms ? ` · ${fmt(recap.ms)}` : ""}</div>`
-        : ""
-    }
+    ${recapLine()}
   `;
 
   root.querySelector("[data-act=start]")?.addEventListener("click", () => void begin(false));
@@ -218,14 +229,8 @@ function skip() {
 
 function end() {
   running = false;
-  if (state.phase !== "idle") {
-    recap = {
-      at: Date.now(),
-      alerts: state.alertsFired,
-      evaded: state.evaded,
-      caught: state.caught,
-      ms: state.sessionStartedAt ? Date.now() - state.sessionStartedAt : 0,
-    };
+  if (state.phase !== "idle" && state.evaded + state.caught > 0) {
+    recap = recapAfterStop(recap, state, Date.now());
     saveRecap(recap);
   }
   audio.stopBeeps();
@@ -258,6 +263,8 @@ function frame(t: number) {
     }
     if (e === "clear" || e === "caught") {
       lastOutcome = e;
+      recap = recapAfterChase(state, now, e, chaseDurationMs(settings));
+      saveRecap(recap);
       audio.stopBeeps();
       if (settings.voiceEnabled) audio.speak(e === "clear" ? "Clear" : "Got you");
     }

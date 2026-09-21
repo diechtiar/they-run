@@ -25,5 +25,5 @@ Local: `npm run build` then serve `apps/pwa/dist` (not `file://`). Dev does not 
 
 ## Stack
 
-Vite + TypeScript PWA. Engine is a workspace package. No accounts. Recap is `localStorage`.
+Vite + TypeScript PWA. Engine is a workspace package. No accounts. Recap is `localStorage`: last surge (CLEAR / GOT YOU and % in zone) plus session totals, written when the surge ends.
 This is a website you can install. It is not an App Store binary yet.
