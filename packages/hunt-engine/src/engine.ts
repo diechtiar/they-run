@@ -16,7 +16,7 @@ export type EngineState = {
   chaseEndsAt: number | null;
   recoverUntil: number | null;
   lastTickAt: number | null;
-  /** Abstract closeness of the chaser: 0 far, 1 they have you. */
+  /** How much of the opening gap the runner has eaten: 0 far, 1 contact. */
   proximity: number;
   speedRatio: number;
   /** Frozen at detect. Null when not in chase. */
@@ -48,6 +48,18 @@ export const START_FIRST_GAP_MS = 180_000;
 export const ZONE_FRACTION = 0.7;
 /** Bar at chase start — they are already on the approach. */
 export const CHASE_START_PROXIMITY = 0.22;
+/**
+ * The runner holds this fraction of the frozen target.
+ * Matching the target means you are faster than them, so the gap opens.
+ */
+export const CHASER_OF_TARGET = 0.82;
+/**
+ * Easy-run floor. A walking baseline must not turn the chaser into a shuffle.
+ * About 9.7 km/h. Faster users still get baseline + protocol %.
+ */
+export const MIN_RUNNER_MPS = 2.7;
+/** Standing still, the opening gap is gone in this many seconds. */
+export const STOP_CATCH_SEC = 11;
 
 export function createIdleState(): EngineState {
   return {
@@ -95,7 +107,8 @@ function enterChase(
   currentMps: number | null,
 ): EngineState {
   const duration = Math.max(15, settings.chaseDurationSec) * 1000;
-  const target = targetSpeedMps(currentMps ?? 0, settings.paceIncreasePct);
+  const protocol = targetSpeedMps(currentMps ?? 0, settings.paceIncreasePct);
+  const target = Math.max(protocol, MIN_RUNNER_MPS);
   return {
     ...state,
     phase: "chase",
@@ -175,6 +188,15 @@ export function skipChase(
   };
 }
 
+/** GPS when the phone has it; tests drive the same meters with a ratio. */
+function youSpeedMps(input: TickInput, target: number, ratio: number): number {
+  if (input.speedRatio != null) return Math.max(0, target * ratio);
+  const gps = input.currentMps;
+  if (gps == null) return Math.max(0, target * ratio);
+  if (input.cheat && input.settings.cheatEnabled) return Math.max(gps, target * 1.2);
+  return Math.max(0, gps);
+}
+
 export function effectiveRatio(input: TickInput, targetMps: number | null): number {
   let ratio = input.speedRatio;
   if (ratio == null) {
@@ -210,18 +232,13 @@ export function tick(
   let next: EngineState = { ...state, speedRatio: ratio, lastTickAt: now };
 
   if (next.phase === "chase") {
-    const durationSec = Math.max(15, input.settings.chaseDurationSec);
-    // Standing still: they close the remaining gap in ~0.75 of the surge.
-    const closeRate = (1 - CHASE_START_PROXIMITY) / (durationSec * 0.75);
-    // In zone: they lose ground on the same time scale, not in a second.
-    const fallRate = (1 - CHASE_START_PROXIMITY) / durationSec;
-    let proximity = next.proximity;
-    if (ratio >= 1) {
-      proximity -= dt * fallRate * Math.min(ratio, 1.6);
-    } else {
-      proximity += dt * closeRate * (1.05 - ratio * 0.5);
-    }
-    proximity = clamp(proximity, 0, 1);
+    const target = next.targetMps ?? MIN_RUNNER_MPS;
+    const chaser = target * CHASER_OF_TARGET;
+    const you = youSpeedMps(input, target, ratio);
+    const far = (chaser * STOP_CATCH_SEC) / (1 - CHASE_START_PROXIMITY);
+    let gap = (1 - next.proximity) * far;
+    gap = clamp(gap + (you - chaser) * dt, 0, far);
+    const proximity = far > 0 ? clamp(1 - gap / far, 0, 1) : 1;
     const dtMs = dt * 1000;
     next = {
       ...next,

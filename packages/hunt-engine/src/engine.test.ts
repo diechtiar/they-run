@@ -137,6 +137,41 @@ describe("chase outcome", () => {
     assert.equal(s.evaded, 0);
     assert.equal(s.caught, 1);
     assert.equal(s.proximity, 1);
+    assert.ok(s.chaseMs < 16_000, `runner should arrive in seconds, took ${s.chaseMs}ms`);
+    assert.ok(s.chaseMs > 8_000, `runner should cover a real gap, took ${s.chaseMs}ms`);
+  });
+
+  it("a short burst opens a gap, and stopping spends it", () => {
+    let s = startDemo(0, DEFAULT_SETTINGS);
+    s = tick(s, DEMO_FIRST_MS, {
+      settings: DEFAULT_SETTINGS,
+      currentMps: 1.4,
+      rng,
+    }).state;
+    const openedAt = s.proximity;
+    const step = 50;
+    const burstMs = 3_000;
+    for (let t = DEMO_FIRST_MS + step; t <= DEMO_FIRST_MS + burstMs; t += step) {
+      s = tick(s, t, {
+        settings: DEFAULT_SETTINGS,
+        currentMps: 3.6,
+        rng,
+      }).state;
+    }
+    const afterBurst = s.proximity;
+    assert.ok(afterBurst < openedAt - 0.05, "faster than the runner buys meters");
+    let caughtAt: number | null = null;
+    for (let t = DEMO_FIRST_MS + burstMs + step; t <= DEMO_FIRST_MS + chaseMs; t += step) {
+      const r = tick(s, t, { settings: DEFAULT_SETTINGS, currentMps: 0, rng });
+      s = r.state;
+      if (r.events.includes("caught")) {
+        caughtAt = t;
+        break;
+      }
+    }
+    assert.ok(caughtAt != null, "stopping lets the runner arrive");
+    const stopMs = (caughtAt ?? 0) - (DEMO_FIRST_MS + burstMs);
+    assert.ok(stopMs < 16_000, `stop should close the gap quickly, took ${stopMs}ms`);
   });
 
   it("in-zone fall-back is gradual, not instant", () => {

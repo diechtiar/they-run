@@ -3,6 +3,7 @@ import {
   RECAP_STORAGE_KEY,
   SETTINGS_STORAGE_KEY,
   acceptSample,
+  CHASER_OF_TARGET,
   beepIntervalMs,
   chaseDurationMs,
   createIdleState,
@@ -132,7 +133,11 @@ function paint() {
   const inChase = state.phase === "chase";
   const theyVisible = inChase || state.phase === "recovering";
   const bar = theyVisible ? Math.round(Math.min(1, Math.max(0, state.proximity)) * 100) : 0;
-  const zone = inChase ? (state.speedRatio >= 1 ? " · pulling away" : " · they're closing") : "";
+  const zone = inChase
+    ? state.speedRatio >= CHASER_OF_TARGET
+      ? " · pulling away"
+      : " · they're closing"
+    : "";
   const live = state.phase !== "idle";
   const wordClass = w.cls ? `word ${w.cls}` : "word";
   if (ui.word.className !== wordClass) ui.word.className = wordClass;
