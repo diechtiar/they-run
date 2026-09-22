@@ -3,13 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "npm test -w @they-run/hunt-engine",
     "dev": "npm run dev -w @they-run/pwa",
-    "build": "npm run build -w @they-run/pwa"
+    "build": "npm run build -w @they-run/pwa",
+    "android:sync": "npm run build && cap sync android"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
   }
 }

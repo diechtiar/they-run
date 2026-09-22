@@ -23,7 +23,8 @@ import {
   type HuntSettings,
   type SpeedSample,
 } from "@they-run/hunt-engine";
-import { createAudio } from "./audio.ts";
+import { createAudio, setNativeAudio } from "./audio.ts";
+import { nativeBeep, nativeShell, nativeSpeak, startNight, stopNight, type NativeFix } from "./night.ts";
 
 const root = document.querySelector("#app")!;
 const audio = createAudio();
@@ -99,8 +100,17 @@ let baseline = 0;
 let cheatHeld = false;
 let wake: WakeLockSentinel | null = null;
 let watchId: number | null = null;
+let lastFix: { lat: number; lon: number; at: number } | null = null;
 let lastOutcome: "clear" | "caught" | "skip" | null = null;
 let running = false;
+let nativeGps = false;
+let nextBeepAt = 0;
+
+declare global {
+  interface Window {
+    __theyRunTick?: () => void;
+  }
+}
 
 function fmt(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -177,31 +187,46 @@ function paint() {
   setText(ui.recapSession, session);
 }
 
+function ingestFix(pos: {
+  timestamp: number;
+  coords: { latitude: number; longitude: number; speed: number | null; accuracy: number | null };
+}) {
+  geo = "active";
+  const { sample: raw, last } = deriveSpeed(pos, lastFix);
+  lastFix = last;
+  const ok = acceptSample(raw, accepted);
+  if (ok) accepted = ok;
+}
+
+function onNativeFix(fix: NativeFix) {
+  ingestFix({
+    timestamp: fix.time || Date.now(),
+    coords: {
+      latitude: fix.lat,
+      longitude: fix.lon,
+      speed: fix.speed < 0 ? null : fix.speed,
+      accuracy: fix.accuracy < 0 ? null : fix.accuracy,
+    },
+  });
+}
+
 function startGeo() {
   if (!navigator.geolocation) {
     geo = "unavailable";
     return;
   }
   geo = "requesting";
-  let lastFix: { lat: number; lon: number; at: number } | null = null;
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
-      geo = "active";
-      const { sample: raw, last } = deriveSpeed(
-        {
-          timestamp: pos.timestamp,
-          coords: {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            speed: pos.coords.speed,
-            accuracy: pos.coords.accuracy,
-          },
+      ingestFix({
+        timestamp: pos.timestamp,
+        coords: {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          speed: pos.coords.speed,
+          accuracy: pos.coords.accuracy,
         },
-        lastFix,
-      );
-      lastFix = last;
-      const ok = acceptSample(raw, accepted);
-      if (ok) accepted = ok;
+      });
     },
     (err) => {
       geo = err.code === err.PERMISSION_DENIED ? "denied" : "unavailable";
@@ -221,48 +246,53 @@ async function begin(demo: boolean) {
   lastOutcome = null;
   baseline = 0;
   accepted = null;
+  lastFix = null;
+  nextBeepAt = 0;
   state = demo ? startDemo(Date.now(), settings) : startSession(Date.now(), settings);
   try {
     wake = (await navigator.wakeLock?.request("screen")) ?? null;
   } catch {
     wake = null;
   }
-  startGeo();
+  nativeGps = await startNight(onNativeFix);
+  if (nativeGps) setNativeAudio({ beep: nativeBeep, speak: nativeSpeak });
+  else startGeo();
   running = true;
   paint();
-  requestAnimationFrame(frame);
+  window.setTimeout(step, 200);
+}
+
+function releaseNight() {
+  running = false;
+  nextBeepAt = 0;
+  nativeGps = false;
+  setNativeAudio(null);
+  void stopNight();
+  stopGeo();
+  void wake?.release();
+  wake = null;
 }
 
 function skip() {
   const r = skipChase(state, Date.now(), settings);
   state = r.state;
-  audio.stopBeeps();
   if (r.events.includes("skip")) lastOutcome = "skip";
-  if (state.phase === "idle") {
-    running = false;
-    stopGeo();
-    void wake?.release();
-    wake = null;
-  }
+  if (state.phase === "idle") releaseNight();
   paint();
 }
 
 function end() {
-  running = false;
   if (state.phase !== "idle" && state.evaded + state.caught > 0) {
     recap = recapAfterStop(recap, state, Date.now());
     saveRecap(recap);
   }
-  audio.stopBeeps();
-  speechSynthesis.cancel();
-  void wake?.release();
-  wake = null;
-  stopGeo();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  releaseNight();
   state = stopSession();
   paint();
 }
 
-function frame(_t: number) {
+function stepOnce() {
   if (!running) return;
   const now = Date.now();
   if (state.phase === "scanning" && accepted) {
@@ -277,21 +307,38 @@ function frame(_t: number) {
   for (const e of events) {
     if (e === "detect") {
       lastOutcome = null;
+      nextBeepAt = now;
       if (settings.voiceEnabled) audio.speak("Chase");
-      if (settings.beepsEnabled) audio.startBeeps(() => beepIntervalMs(state.proximity));
       if (settings.hapticsEnabled) navigator.vibrate?.([40, 40, 80]);
     }
     if (e === "clear" || e === "caught") {
       lastOutcome = e;
+      nextBeepAt = 0;
       recap = recapAfterChase(state, now, e, chaseDurationMs(settings));
       saveRecap(recap);
-      audio.stopBeeps();
       if (settings.voiceEnabled) audio.speak(e === "clear" ? "Clear" : "Got you");
     }
   }
+  if (settings.beepsEnabled && state.phase === "chase") {
+    if (nextBeepAt === 0) nextBeepAt = now;
+    if (now >= nextBeepAt) {
+      audio.beep();
+      nextBeepAt = now + beepIntervalMs(state.proximity);
+    }
+  } else if (state.phase !== "chase") {
+    nextBeepAt = 0;
+  }
   paint();
-  requestAnimationFrame(frame);
 }
+
+function step() {
+  stepOnce();
+  if (running) window.setTimeout(step, 200);
+}
+
+window.__theyRunTick = () => {
+  if (running) stepOnce();
+};
 
 window.addEventListener("pointerdown", () => {
   cheatHeld = true;
@@ -315,12 +362,12 @@ ui.cheat.addEventListener("change", () => {
 ui.beeps.addEventListener("change", () => {
   settings = { ...settings, beepsEnabled: ui.beeps.checked };
   saveSettings(settings);
-  if (!settings.beepsEnabled) audio.stopBeeps();
+  if (!settings.beepsEnabled) nextBeepAt = 0;
   paint();
 });
 
 paint();
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (import.meta.env.PROD && "serviceWorker" in navigator && !nativeShell()) {
   void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
 }

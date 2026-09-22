@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">THEY RUN</string>
+    <string name="title_activity_main">THEY RUN</string>
+    <string name="package_name">app.theyran.run</string>
+    <string name="custom_url_scheme">app.theyran.run</string>
+    <string name="night_notice">A night is in progress</string>
+</resources>
